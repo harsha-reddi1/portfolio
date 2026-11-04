@@ -169,7 +169,7 @@ export default function AdminModal({
       if (res && res.data) {
         setDataCopy(res.data);
         onDataUpdate(res.data);
-        setImportStatus({ type: 'success', text: 'Resume JSON successfully imported! All portfolio sections have been updated.' });
+        setImportStatus({ type: 'success', text: 'Data successfully imported! All portfolio sections and AI Agent have been updated.' });
         setTimeout(() => {
           setImportStatus(null);
           setActiveTab('profile');
@@ -306,16 +306,7 @@ export default function AdminModal({
     reader.onload = async (event) => {
       try {
         const text = event.target?.result;
-        const imported = JSON.parse(text);
-        if (imported.basics || imported.sections) {
-          // Reactive Resume JSON format!
-          await handleApplyResumeJson(text);
-        } else {
-          // Portfolio full backup format
-          imported.is_custom = true;
-          setDataCopy(imported);
-          await handleSaveAll(imported);
-        }
+        await handleApplyResumeJson(text);
       } catch (err) {
         alert('Invalid JSON file format: ' + err.message);
       }

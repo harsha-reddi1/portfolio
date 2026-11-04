@@ -200,12 +200,8 @@ def extract_bullets_from_html(html_text: str) -> List[str]:
 
 def populate_from_resume_payload(db: Session, payload: dict) -> None:
     """
-    Parses Reactive Resume / JSON export payload and updates database tables.
+    Parses Reactive Resume, standard JSON Resume, or full Portfolio export payload and updates database tables.
     """
-    basics = payload.get("basics", {})
-    summary_data = payload.get("summary", {})
-    summary_content = clean_html_tags(summary_data.get("content", ""))
-
     # 1. Update / create Profile
     profile = db.query(Profile).first()
     if not profile:
@@ -213,35 +209,89 @@ def populate_from_resume_payload(db: Session, payload: dict) -> None:
         db.add(profile)
         db.flush()
 
+    # Clear previous social URLs so old URLs don't bleed into the new profile
+    profile.github_url = ""
+    profile.linkedin_url = ""
+    profile.hackerrank_url = ""
+    profile.x_url = ""
+    profile.leetcode_url = ""
+    profile.website_url = ""
+
+    prof_data = payload.get("profile")
+    if prof_data and isinstance(prof_data, dict):
+        profile.name = prof_data.get("name") or profile.name
+        profile.title = prof_data.get("title") or profile.title
+        profile.email = prof_data.get("email") or profile.email
+        profile.phone = prof_data.get("phone") or ""
+        profile.location = prof_data.get("location") or ""
+        profile.summary = prof_data.get("summary") or ""
+        profile.github_url = prof_data.get("github_url") or ""
+        profile.linkedin_url = prof_data.get("linkedin_url") or ""
+        profile.hackerrank_url = prof_data.get("hackerrank_url") or ""
+        profile.x_url = prof_data.get("x_url") or ""
+        profile.leetcode_url = prof_data.get("leetcode_url") or ""
+        profile.website_url = prof_data.get("website_url") or ""
+        profile.resume_download_url = prof_data.get("resume_download_url") or "#"
+
+    basics = payload.get("basics") or (payload.get("profile") if isinstance(payload.get("profile"), dict) else {}) or {}
+    summary_data = payload.get("summary", {})
+    summary_content = clean_html_tags(summary_data.get("content", "")) if isinstance(summary_data, dict) else (basics.get("summary") or "")
+
     if basics.get("name"):
         profile.name = basics.get("name")
-    if basics.get("headline"):
-        profile.title = basics.get("headline")
+    if basics.get("headline") or basics.get("title") or basics.get("label"):
+        profile.title = basics.get("headline") or basics.get("title") or basics.get("label")
     if basics.get("email"):
         profile.email = basics.get("email")
     if basics.get("phone"):
         profile.phone = basics.get("phone")
     if basics.get("location"):
-        profile.location = basics.get("location")
+        loc = basics.get("location")
+        profile.location = f"{loc.get('city', '')}, {loc.get('region', '')}" if isinstance(loc, dict) else str(loc)
     if summary_content:
         profile.summary = summary_content
 
+    # Check direct basics URLs
+    if basics.get("github_url") or basics.get("github"):
+        profile.github_url = basics.get("github_url") or basics.get("github")
+    if basics.get("linkedin_url") or basics.get("linkedin"):
+        profile.linkedin_url = basics.get("linkedin_url") or basics.get("linkedin")
+    if basics.get("url") or basics.get("website"):
+        w = basics.get("url") or basics.get("website")
+        if isinstance(w, str):
+            profile.website_url = w
+            if "github.com" in w and not profile.github_url:
+                profile.github_url = w
+            elif "linkedin.com" in w and not profile.linkedin_url:
+                profile.linkedin_url = w
+
     sections = payload.get("sections", {})
 
-    # Profiles / Social links
-    profiles_list = sections.get("profiles", {}).get("items", [])
+    # Profiles / Social links list from sections, basics, or root
+    profiles_list = (
+        sections.get("profiles", {}).get("items", []) or
+        basics.get("profiles", []) or
+        payload.get("profiles", [])
+    )
     for p in profiles_list:
-        net = (p.get("network") or "").lower()
-        url = (p.get("website", {}) or {}).get("url") or ""
-        if "linkedin" in net:
+        net = (p.get("network") or p.get("name") or "").lower()
+        url = (
+            (p.get("website", {}) or {}).get("url") or
+            p.get("url") or
+            (p.get("website") if isinstance(p.get("website"), str) else "") or
+            ""
+        ).strip()
+        if not url:
+            continue
+        if "linkedin" in net and not profile.linkedin_url:
             profile.linkedin_url = url
-        elif "github" in net:
-            profile.github_url = url.replace("harsha1598", "harsha-reddi1")
-        elif "hackerrank" in net:
+        elif "github" in net and not profile.github_url:
+            profile.github_url = url
+        elif "hackerrank" in net and not profile.hackerrank_url:
             profile.hackerrank_url = url
-        elif "x" in net or "twitter" in net:
+        elif ("x" in net or "twitter" in net) and not profile.x_url:
             profile.x_url = url
-        elif "leetcode" in net:
+        elif "leetcode" in net and not profile.leetcode_url:
             profile.leetcode_url = url
 
     # Clear previous relational records
@@ -254,26 +304,27 @@ def populate_from_resume_payload(db: Session, payload: dict) -> None:
     db.flush()
 
     # 2. Experiences
-    exp_items = sections.get("experience", {}).get("items", [])
+    exp_items = sections.get("experience", {}).get("items", []) or payload.get("work", []) or payload.get("experiences", [])
     for idx, e in enumerate(exp_items):
-        raw_desc = e.get("description", "")
-        # Extract skills_text with robust regex
+        raw_desc = e.get("description") or e.get("summary") or ""
         skills_match = re.search(r"Skill\(s\)\s*[-:]\s*(?:</strong>)?(.*?)(?:</strong>)?\s*</p>", raw_desc, re.IGNORECASE | re.DOTALL)
         if not skills_match:
             skills_match = re.search(r"Skill\(s\)\s*[-:]\s*(.*?)(?:</p>|<ul>|<li>|$)", raw_desc, re.IGNORECASE)
         skills_text = clean_html_tags(skills_match.group(1)).rstrip(".") if skills_match else ""
+        if not skills_text and isinstance(e.get("skills"), list):
+            skills_text = ", ".join(e.get("skills"))
 
-        # Extract bullets from <li> tags
         bullets = extract_bullets_from_html(raw_desc)
+        if not bullets and isinstance(e.get("highlights"), list):
+            bullets = [clean_html_tags(h) for h in e.get("highlights") if h]
 
-        # Extract pure description: remove <p>...Skill(s)...</p> and <ul>...</ul>
         desc_without_skills = re.sub(r"<p>\s*(?:<strong>)?\s*Skill\(s\).*?<\/p>", "", raw_desc, flags=re.IGNORECASE | re.DOTALL)
         desc_without_bullets = re.sub(r"<ul[^>]*>.*?<\/ul>", "", desc_without_skills, flags=re.IGNORECASE | re.DOTALL)
         clean_desc = clean_html_tags(desc_without_bullets).strip()
 
         period = e.get("period", "")
-        period_parts = [p.strip() for p in re.split(r"\s*(?:[\u2013\u2014\-]|\bto\b)\s*", period) if p.strip()] if period else []
-        is_current = bool((e.get("dates", {}) or {}).get("present", False) or "present" in period.lower())
+        period_parts = [p.strip() for p in re.split(r"\s*(?:[–—\-]|to)\s*", period) if p.strip()] if period else []
+        is_current = bool((e.get("dates", {}) or {}).get("present", False) or e.get("is_current") or "present" in str(period).lower())
 
         if len(period_parts) >= 2:
             start_date = period_parts[0]
@@ -283,46 +334,20 @@ def populate_from_resume_payload(db: Session, payload: dict) -> None:
             end_date = "Present" if is_current else ""
         else:
             dates = e.get("dates", {}) or {}
-            start_date = dates.get("start") or "2020"
-            end_date = "Present" if is_current else (dates.get("end") or "")
+            start_date = e.get("start_date") or e.get("startDate") or dates.get("start") or ""
+            end_date = "Present" if is_current else (e.get("end_date") or e.get("endDate") or dates.get("end") or "")
 
-        company = e.get("company") or "Company"
-        role = e.get("position") or "Software Engineer"
+        company = e.get("company") or e.get("name") or "Company"
+        role = e.get("position") or e.get("role") or "Software Engineer"
 
-        # If clean_desc and bullets are both empty (e.g. newly joined role):
         if not clean_desc and not bullets:
-            if is_current:
-                if "deloitte" in company.lower():
-                    clean_desc = "Architecting full-stack solutions, distributed data pipelines, and GenAI agent platforms for enterprise analytics."
-                    bullets = [
-                        "Delivered full-stack and GenAI work across APIs, data pipelines, UI and LLM agents for a consumer-spend analytics platform.",
-                        "Built over half of the platform’s domain-specialist tool-calling agents, plus a RAG agent over curated documentation and an MCP tool layer.",
-                        "Designed grounded LLM generation with server-validated figures, cutting repeat response latency ~45x via hash-based caching.",
-                        "Delivered reporting, retail-metrics, and scenario-planning APIs (FastAPI, PostgreSQL, BigQuery) with 97–100% test coverage.",
-                        "Built geospatial analytics using HyperLogLog sketches for de-duplicated shopper counts, expanding capacity 10x.",
-                        "Optimized PostgreSQL with query-plan-driven indexes, achieving 13x faster query performance.",
-                        "Built a generative content pipeline turning anomaly detection into LLM-written articles with automated vision screening.",
-                    ]
-                    if not skills_text:
-                        skills_text = "Python, Typescript, FastAPI, LiteLLM, PostgreSQL, BigQuery, React JS, Gen AI, ArgoCD, KEDA"
-                else:
-                    clean_desc = f"Software Engineer at {company}, driving scalable backend architectures and cloud data systems."
-                    bullets = [
-                        f"Driving enterprise software engineering initiatives and system architectures at {company}.",
-                        "Collaborating with cross-functional engineering teams to deliver scalable, high-performance services."
-                    ]
-                    if not skills_text:
-                        skills_text = "Python, Cloud Architecture, Big Data, SQL, Microservices"
-            else:
-                clean_desc = f"Key contributor to software engineering and data solutions at {company}."
-                bullets = [clean_desc]
-        elif not clean_desc and bullets:
-            clean_desc = ""
+            clean_desc = f"Software Engineer at {company}, driving software architecture and delivery."
+            bullets = [clean_desc]
 
         exp = Experience(
             company=company,
             role=role,
-            location=e.get("location", ""),
+            location=e.get("location", "") if isinstance(e.get("location"), str) else "",
             start_date=start_date,
             end_date=end_date,
             is_current=is_current,
@@ -334,30 +359,30 @@ def populate_from_resume_payload(db: Session, payload: dict) -> None:
         db.add(exp)
 
     # 3. Education
-    edu_items = sections.get("education", {}).get("items", [])
+    edu_items = sections.get("education", {}).get("items", []) or payload.get("education", [])
     for idx, ed in enumerate(edu_items):
         dates = ed.get("dates", {}) or {}
         ed_period = ed.get("period", "")
-        ed_parts = [p.strip() for p in re.split(r"\s*(?:[\u2013\u2014\-]|\bto\b)\s*", ed_period) if p.strip()] if ed_period else []
-        start_year = ed_parts[0] if len(ed_parts) >= 1 else (dates.get("start") or "")
-        end_year = ed_parts[1] if len(ed_parts) >= 2 else (dates.get("end") or "")
+        ed_parts = [p.strip() for p in re.split(r"\s*(?:[–—\-]|to)\s*", ed_period) if p.strip()] if ed_period else []
+        start_year = ed_parts[0] if len(ed_parts) >= 1 else (ed.get("start_year") or dates.get("start") or "")
+        end_year = ed_parts[1] if len(ed_parts) >= 2 else (ed.get("end_year") or dates.get("end") or "")
 
         db.add(
             Education(
-                institution=ed.get("school") or "Institution",
+                institution=ed.get("school") or ed.get("institution") or "Institution",
                 degree=ed.get("degree") or "Degree",
-                field_of_study=ed.get("area") or "Engineering",
+                field_of_study=ed.get("area") or ed.get("field_of_study") or "Engineering",
                 grade=ed.get("grade") or "",
                 start_year=start_year,
                 end_year=end_year,
-                url=(ed.get("website", {}) or {}).get("url") or "",
+                url=(ed.get("website", {}) or {}).get("url") or ed.get("url") or "",
             )
         )
 
     # 4. Skills
-    skill_items = sections.get("skills", {}).get("items", [])
+    skill_items = sections.get("skills", {}).get("items", []) or payload.get("skills", [])
     for idx, s in enumerate(skill_items):
-        name = s.get("name", "").strip()
+        name = (s if isinstance(s, str) else s.get("name", "")).strip()
         if not name:
             continue
         n_low = name.lower()
@@ -384,19 +409,28 @@ def populate_from_resume_payload(db: Session, payload: dict) -> None:
         )
 
     # 5. Projects
-    proj_items = sections.get("projects", {}).get("items", [])
+    proj_items = sections.get("projects", {}).get("items", []) or payload.get("projects", [])
     for idx, pr in enumerate(proj_items):
-        p_name = pr.get("name") or f"Project {idx + 1}"
+        p_name = pr.get("name") or pr.get("title") or f"Project {idx + 1}"
         p_desc = clean_html_tags(pr.get("description", "")) or f"{p_name} architecture and deployment."
-        p_url = (pr.get("website", {}) or {}).get("url") or ""
+        p_url = (
+            pr.get("github_url") or
+            (pr.get("website", {}) or {}).get("url") or
+            pr.get("url") or
+            (pr.get("website") if isinstance(pr.get("website"), str) else "") or
+            ""
+        )
+        live_url = pr.get("live_url") or pr.get("website_url") or ""
+        if p_url and not p_url.startswith("http"):
+            p_url = f"https://{p_url}"
         db.add(
             Project(
                 title=p_name,
-                subtitle="Engineered Solution",
+                subtitle=pr.get("subtitle") or "Engineered Solution",
                 description=p_desc,
-                tech_stack="Python, Cloud Services, REST APIs",
+                tech_stack=pr.get("tech_stack") or "Python, Cloud Services, REST APIs",
                 github_url=p_url,
-                live_url="",
+                live_url=live_url,
                 highlights=json.dumps([p_desc]),
                 featured=True,
                 display_order=idx + 1,
@@ -404,29 +438,29 @@ def populate_from_resume_payload(db: Session, payload: dict) -> None:
         )
 
     # 6. Awards
-    award_items = sections.get("awards", {}).get("items", [])
+    award_items = sections.get("awards", {}).get("items", []) or payload.get("awards", [])
     for idx, aw in enumerate(award_items):
         a_title = aw.get("title") or "Recognition"
         db.add(
             Award(
                 title=a_title,
-                organization=aw.get("awarder") or "Corporate Honor",
-                year=aw.get("date") or (aw.get("dates", {}) or {}).get("start", ""),
+                organization=aw.get("awarder") or aw.get("organization") or "Corporate Honor",
+                year=aw.get("date") or (aw.get("dates", {}) or {}).get("start") or aw.get("year") or "",
                 description=clean_html_tags(aw.get("description", "")),
                 display_order=idx + 1,
             )
         )
 
     # 7. Certifications
-    cert_items = sections.get("certifications", {}).get("items", [])
+    cert_items = sections.get("certifications", {}).get("items", []) or payload.get("certifications", []) or payload.get("certificates", [])
     for idx, ct in enumerate(cert_items):
-        c_title = ct.get("title") or "Certification"
+        c_title = ct.get("title") or ct.get("name") or "Certification"
         db.add(
             Certification(
                 name=c_title,
                 issuer=ct.get("issuer") or "Accredited Provider",
-                issue_date=ct.get("date") or "",
-                credential_url=(ct.get("website", {}) or {}).get("url") or "",
+                issue_date=ct.get("date") or ct.get("issue_date") or "",
+                credential_url=(ct.get("website", {}) or {}).get("url") or ct.get("url") or "",
                 display_order=idx + 1,
             )
         )

@@ -43,7 +43,7 @@ import {
   Network,
   GitBranch,
 } from 'lucide-react';
-import { sendChatMessage } from '../services/api';
+import { sendChatMessage, getLocalData } from '../services/api';
 import { GithubIcon, LinkedinIcon } from './Icons';
 
 // Native Web Audio API for subtle HUD audio feedback
@@ -91,52 +91,38 @@ function playHudSound(type = 'chirp') {
 // ---------------------------------------------------------------------------
 // On-Demand Component 1: Interactive Multi-Axis Competency Radar Chart
 // ---------------------------------------------------------------------------
-function RadarSkillChart({ activeDomain = 'backend', onSelectDomain }) {
-  const domains = useMemo(
-    () => [
-      {
-        id: 'backend',
-        name: 'Backend & Core',
-        score: 96,
-        tech: 'Python, FastAPI, Django, AsyncIO, REST',
-        metrics: 'Sub-second API latency, resilient concurrency',
-        color: '#06b6d4',
-      },
-      {
-        id: 'cloud',
-        name: 'Cloud & Big Data',
-        score: 92,
-        tech: 'Azure Synapse, PySpark, Databricks, Docker',
-        metrics: 'High-throughput analytical pipelines & warehouses',
-        color: '#10b981',
-      },
-      {
-        id: 'genai',
-        name: 'GenAI & Agents',
-        score: 94,
-        tech: 'LiteLLM, RAG, MCP Agents, Grounding Gates',
-        metrics: 'Deterministic verification & prompt caching',
-        color: '#a855f7',
-      },
-      {
-        id: 'database',
-        name: 'Databases & Tuning',
-        score: 95,
-        tech: 'PostgreSQL, BigQuery, HyperLogLog, Redis',
-        metrics: 'Query plan optimization & 13x speedups',
-        color: '#f59e0b',
-      },
-      {
-        id: 'frontend',
-        name: 'Frontend & UI',
-        score: 88,
-        tech: 'React JS, Tailwind CSS, Responsive Systems',
-        metrics: 'Reactive command centers & rich telemetry',
-        color: '#3b82f6',
-      },
-    ],
-    []
-  );
+function RadarSkillChart({ activeDomain = 'backend', onSelectDomain, skills = [] }) {
+  const domains = useMemo(() => {
+    if (skills && skills.length > 0) {
+      const getCategorySkills = (catMatch) => {
+        return skills
+          .filter(s => (s.category || '').toLowerCase().includes(catMatch) || (s.name || '').toLowerCase().includes(catMatch))
+          .map(s => s.name)
+          .slice(0, 5)
+          .join(', ');
+      };
+      const be = getCategorySkills('backend') || getCategorySkills('lang') || 'Python, APIs, Distributed Systems';
+      const cl = getCategorySkills('cloud') || getCategorySkills('data') || 'Cloud Architecture, Microservices';
+      const ai = getCategorySkills('ai') || getCategorySkills('gen') || 'System Architecture, Scalable Backends';
+      const db = getCategorySkills('data') || getCategorySkills('sql') || 'Relational & Analytical Databases';
+      const fe = getCategorySkills('front') || getCategorySkills('ui') || 'Modern Frontend, Dashboards, UI';
+
+      return [
+        { id: 'backend', name: 'Backend & Core', score: 96, tech: be, metrics: 'Sub-second API latency, resilient concurrency', color: '#06b6d4' },
+        { id: 'cloud', name: 'Cloud & Big Data', score: 92, tech: cl, metrics: 'High-throughput analytical pipelines & warehouses', color: '#10b981' },
+        { id: 'genai', name: 'AI & Architecture', score: 94, tech: ai, metrics: 'Deterministic verification & prompt caching', color: '#a855f7' },
+        { id: 'database', name: 'Databases & Tuning', score: 95, tech: db, metrics: 'Query plan optimization & scalable indexing', color: '#f59e0b' },
+        { id: 'frontend', name: 'Frontend & UI', score: 88, tech: fe, metrics: 'Reactive command centers & rich telemetry', color: '#3b82f6' },
+      ];
+    }
+    return [
+      { id: 'backend', name: 'Backend & Core', score: 96, tech: 'Python, FastAPI, Django, AsyncIO, REST', metrics: 'Sub-second API latency, resilient concurrency', color: '#06b6d4' },
+      { id: 'cloud', name: 'Cloud & Big Data', score: 92, tech: 'Azure Synapse, PySpark, Databricks, Docker', metrics: 'High-throughput analytical pipelines & warehouses', color: '#10b981' },
+      { id: 'genai', name: 'GenAI & Agents', score: 94, tech: 'LiteLLM, RAG, MCP Agents, Grounding Gates', metrics: 'Deterministic verification & prompt caching', color: '#a855f7' },
+      { id: 'database', name: 'Databases & Tuning', score: 95, tech: 'PostgreSQL, BigQuery, HyperLogLog, Redis', metrics: 'Query plan optimization & 13x speedups', color: '#f59e0b' },
+      { id: 'frontend', name: 'Frontend & UI', score: 88, tech: 'React JS, Tailwind CSS, Responsive Systems', metrics: 'Reactive command centers & rich telemetry', color: '#3b82f6' },
+    ];
+  }, [skills]);
 
   const cx = 150;
   const cy = 135;
@@ -1171,13 +1157,31 @@ function IronManArcReactor() {
 }
 
 export default function ChatWidget({
-  profile = {},
-  experiences = [],
-  projects = [],
-  skills = [],
-  posts = [],
+  isOpen: propIsOpen,
+  setIsOpen: propSetIsOpen,
+  portfolioData,
+  profile: propProfile,
+  experiences: propExperiences,
+  projects: propProjects,
+  skills: propSkills,
+  posts: propPosts,
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+  const isOpen = propIsOpen !== undefined ? propIsOpen : internalIsOpen;
+  const setIsOpen = propSetIsOpen || setInternalIsOpen;
+
+  // Active data derived from portfolioData prop, individual props, or localStorage
+  const activeData = portfolioData || getLocalData() || {};
+  const profile = activeData.profile || propProfile || {};
+  const experiences = activeData.experiences || propExperiences || [];
+  const projects = activeData.projects || propProjects || [];
+  const skills = activeData.skills || propSkills || [];
+  const posts = activeData.posts || propPosts || [];
+
+  const fullName = profile?.name?.trim() || 'Developer';
+  const firstName = fullName !== 'Developer' ? fullName.split(' ')[0] : 'Developer';
+  const agentName = `${firstName}'s Agent`;
+
   const [isFullScreen, setIsFullScreen] = useState(true);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]); // Initially empty: pure search bar state
@@ -1191,10 +1195,6 @@ export default function ChatWidget({
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const recognitionRef = useRef(null);
-
-  const fullName = profile?.name || 'Harsha Vardhan Reddy';
-  const firstName = fullName.split(' ')[0] || 'Harsha';
-  const agentName = `${firstName}'s Agent`;
 
   // Keyboard shortcut Ctrl+K and Esc
   useEffect(() => {
@@ -1356,7 +1356,7 @@ export default function ChatWidget({
     setLoading(true);
 
     try {
-      const res = await sendChatMessage(query);
+      const res = await sendChatMessage(query, 'general', activeData);
       const reply = res.reply || `Synthesized information for "${query}".`;
       const componentType = determineVisualComponent(query, reply);
 
@@ -1399,6 +1399,7 @@ export default function ChatWidget({
           <RadarSkillChart
             activeDomain={activeRadarDomain}
             onSelectDomain={setActiveRadarDomain}
+            skills={skills}
           />
         );
 
@@ -1708,14 +1709,14 @@ export default function ChatWidget({
 
   const initialSuggestions = [
     { label: `Who is ${firstName}?`, query: `Who is ${firstName}?` },
-    { label: 'Show featured projects', query: 'Show me featured projects' },
-    { label: 'Where has he worked?', query: 'Where has he worked in his career?' },
+    { label: `Show ${firstName}'s featured projects`, query: `Show me ${firstName}'s featured projects` },
+    { label: `Where has ${firstName} worked?`, query: `Where has ${firstName} worked in career?` },
     { label: 'Show competency radar chart', query: 'Show the competency radar chart' },
     { label: 'Show GenAI architecture flow', query: 'Show GenAI system architecture flow' },
     { label: 'Compare query latency in a graph', query: 'Compare query latency in a graph' },
     { label: 'Show Postgres query plan comparison', query: 'Show Postgres query plan tuning comparison' },
     { label: 'What technical blogs did he write?', query: 'What technical blogs did he write?' },
-    { label: 'How can I get in touch?', query: 'How can I get in touch with him?' },
+    { label: 'How can I get in touch?', query: `How can I get in touch with ${firstName}?` },
   ];
 
   return (
@@ -1968,7 +1969,7 @@ export default function ChatWidget({
 
                       {/* Dynamic Contextual Follow-Up Suggestions */}
                       <FollowUpSuggestions
-                        suggestions={getFollowUpSuggestions(msg.componentType, msg.text, firstName)}
+                        suggestions={getFollowUpSuggestions(msg.componentType, msg.text, firstName, experiences, projects)}
                         onSelect={(query) => handleSend(query)}
                       />
                     </div>

@@ -72,35 +72,27 @@ export const checkApiHealth = async () => {
 // Fetch Portfolio Data (Primary: Vercel API -> Secondary: Local Storage Fallback)
 export const fetchPortfolioData = async () => {
   const local = getLocalData();
-  const isLocalCustom = Boolean(
-    local && (
-      local.is_custom === true || 
-      (local.profile && local.profile.name && local.profile.name !== 'Developer Portfolio' && local.profile.email !== 'developer@example.com')
-    )
-  );
+  const isLocalCustom = Boolean(local && local.is_custom === true);
 
   try {
     const res = await smartFetch('/portfolio');
     if (res && res.ok) {
       const remote = await res.json();
       
-      const isRemoteSeed = !remote?.profile || 
-        remote.profile.name === 'Developer Portfolio' || 
-        remote.profile.name === 'Your Name' || 
-        remote.profile.email === 'developer@example.com';
-
-      if (!isRemoteSeed) {
-        remote.is_custom = true;
-        saveLocalData(remote);
-        return { data: remote, source: 'api' };
-      }
-
-      if (isLocalCustom && isRemoteSeed) {
+      // If user uploaded or customized portfolio locally in this browser, preserve it!
+      // Only override if remote explicitly has a newer last_updated timestamp.
+      if (isLocalCustom) {
+        if (remote?.last_updated && local?.last_updated && remote.last_updated > local.last_updated) {
+          saveLocalData(remote);
+          return { data: remote, source: 'api' };
+        }
         return { data: local, source: 'local' };
       }
 
-      saveLocalData(remote);
-      return { data: remote, source: 'api' };
+      if (remote && remote.profile && remote.profile.name) {
+        saveLocalData(remote);
+        return { data: remote, source: 'api' };
+      }
     }
   } catch (err) {
     console.warn('API fetch failed, falling back to local storage:', err);
@@ -286,9 +278,9 @@ export const resetToDefaults = async () => {
   return { ...defaultPortfolioData, is_custom: false };
 };
 // AI Agent Chat (Interactive Multi-Mode Support)
-export const sendChatMessage = async (message, mode = 'general') => {
+export const sendChatMessage = async (message, mode = 'general', customPortfolioData = null) => {
   try {
-    const local = getLocalData();
+    const local = customPortfolioData || getLocalData();
     const res = await smartFetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -307,50 +299,115 @@ export const sendChatMessage = async (message, mode = 'general') => {
   }
 };
 
-// Client-side parser for Resume JSON (Reactive Resume / JSON export format)
+// Client-side parser for Resume JSON (Reactive Resume, JSON Resume, or Full Portfolio JSON format)
 export function parseResumeJson(jsonPayload) {
-  const basics = jsonPayload.basics || {};
-  const summaryContent = jsonPayload.summary?.content || '';
+  if (!jsonPayload || typeof jsonPayload !== 'object') {
+    return {};
+  }
+
+  // 1. Format: Full Portfolio Export
+  if (jsonPayload.profile && (jsonPayload.experiences || jsonPayload.projects || jsonPayload.skills)) {
+    const prof = jsonPayload.profile || {};
+    return {
+      profile: {
+        name: prof.name || 'Developer',
+        title: prof.title || 'Software Engineer',
+        email: prof.email || '',
+        phone: prof.phone || '',
+        location: prof.location || '',
+        summary: prof.summary || '',
+        years_experience: prof.years_experience || 6,
+        linkedin_url: prof.linkedin_url || '',
+        github_url: prof.github_url || '',
+        hackerrank_url: prof.hackerrank_url || '',
+        x_url: prof.x_url || '',
+        leetcode_url: prof.leetcode_url || '',
+        website_url: prof.website_url || '',
+        resume_download_url: prof.resume_download_url || '#',
+      },
+      experiences: jsonPayload.experiences || [],
+      skills: jsonPayload.skills || [],
+      projects: jsonPayload.projects || [],
+      education: jsonPayload.education || [],
+      awards: jsonPayload.awards || [],
+      certifications: jsonPayload.certifications || [],
+      ai_insights: jsonPayload.ai_insights || [],
+      posts: jsonPayload.posts || [],
+    };
+  }
+
+  // 2. Format: Reactive Resume (v4) or Standard JSON Resume
+  const basics = jsonPayload.basics || jsonPayload.profile || {};
+  const summaryContent = jsonPayload.summary?.content || basics.summary || '';
   const cleanSummary = summaryContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-  const profilesList = jsonPayload.sections?.profiles?.items || [];
-  let linkedin = '', github = '', hackerrank = '', x = '', leetcode = '';
+  const profilesList = [
+    ...(jsonPayload.sections?.profiles?.items || []),
+    ...(basics.profiles || []),
+    ...(jsonPayload.profiles || []),
+  ];
+
+  let linkedin = basics.linkedin_url || basics.linkedin || '';
+  let github = basics.github_url || basics.github || '';
+  let hackerrank = basics.hackerrank_url || '';
+  let x = basics.x_url || basics.twitter || '';
+  let leetcode = basics.leetcode_url || '';
+
   for (const p of profilesList) {
-    const net = (p.network || '').toLowerCase();
-    const url = p.website?.url || '';
-    if (net.includes('linkedin')) linkedin = url;
-    else if (net.includes('github')) github = url.replace('harsha1598', 'harsha-reddi1');
-    else if (net.includes('hackerrank')) hackerrank = url;
-    else if (net.includes('x') || net.includes('twitter')) x = url;
-    else if (net.includes('leetcode')) leetcode = url;
+    const net = (p.network || p.name || '').toLowerCase();
+    const rawUrl = p.website?.url || p.url || (typeof p.website === 'string' ? p.website : '') || '';
+    const cleanUrl = rawUrl.trim();
+    if (!cleanUrl) continue;
+
+    if (net.includes('linkedin') && !linkedin) linkedin = cleanUrl;
+    else if (net.includes('github') && !github) github = cleanUrl;
+    else if (net.includes('hackerrank') && !hackerrank) hackerrank = cleanUrl;
+    else if ((net.includes('x') || net.includes('twitter')) && !x) x = cleanUrl;
+    else if (net.includes('leetcode') && !leetcode) leetcode = cleanUrl;
+  }
+
+  const websiteUrl = basics.website?.url || basics.url || (typeof basics.website === 'string' ? basics.website : '') || '';
+  if (websiteUrl) {
+    if (websiteUrl.includes('github.com') && !github) github = websiteUrl;
+    else if (websiteUrl.includes('linkedin.com') && !linkedin) linkedin = websiteUrl;
   }
 
   const profile = {
-    name: basics.name || 'Developer Portfolio',
-    title: basics.headline || 'Full Stack Developer',
-    email: basics.email || 'developer@example.com',
+    name: basics.name || 'Developer',
+    title: basics.headline || basics.title || basics.label || 'Software Engineer',
+    email: basics.email || '',
     phone: basics.phone || '',
-    location: basics.location || '',
+    location: (typeof basics.location === 'object' ? [basics.location.city, basics.location.region, basics.location.countryCode].filter(Boolean).join(', ') : basics.location) || '',
     summary: cleanSummary,
-    years_experience: 6,
+    years_experience: basics.years_experience || 6,
     linkedin_url: linkedin,
     github_url: github,
     hackerrank_url: hackerrank,
     x_url: x,
     leetcode_url: leetcode,
-    website_url: basics.website?.url || '',
-    resume_download_url: '#',
+    website_url: websiteUrl,
+    resume_download_url: basics.resume_download_url || '#',
   };
 
-  const expItems = jsonPayload.sections?.experience?.items || [];
+  const expItems = [
+    ...(jsonPayload.sections?.experience?.items || []),
+    ...(jsonPayload.work || []),
+    ...(jsonPayload.experiences || []),
+  ];
+
   const experiences = expItems.map((e, idx) => {
-    const rawDesc = e.description || '';
+    const rawDesc = e.description || e.summary || '';
+    const company = e.company || e.name || 'Company';
+    const role = e.position || e.role || 'Software Engineer';
 
     // Extract skills_text with robust regex
     const skillsMatch =
       rawDesc.match(/Skill\(s\)\s*[-:]\s*(?:<\/strong>)?(.*?)(?:<\/strong>)?\s*<\/p>/i) ||
       rawDesc.match(/Skill\(s\)\s*[-:]\s*(.*?)(?:<\/p>|<ul>|<li>|$)/i);
     let skillsText = skillsMatch ? skillsMatch[1].replace(/<[^>]+>/g, '').trim().replace(/\.$/, '') : '';
+    if (!skillsText && Array.isArray(e.skills)) {
+      skillsText = e.skills.join(', ');
+    }
 
     // Extract bullets from <li> tags
     const bullets = Array.from(rawDesc.matchAll(/<li>(?:<p>)?(.*?)(?:<\/p>)?<\/li>/gs)).map(m =>
@@ -362,6 +419,10 @@ export function parseResumeJson(jsonPayload) {
         .trim()
     ).filter(Boolean);
 
+    if (!bullets.length && Array.isArray(e.highlights)) {
+      bullets.push(...e.highlights);
+    }
+
     // Extract pure description: remove Skill(s) paragraph and <ul>...</ul> block
     const descWithoutSkills = rawDesc.replace(/<p>\s*(?:<strong>)?\s*Skill\(s\).*?<\/p>/gis, '');
     const descWithoutBullets = descWithoutSkills.replace(/<ul[^>]*>.*?<\/ul>/gis, '');
@@ -369,15 +430,13 @@ export function parseResumeJson(jsonPayload) {
       .replace(/<style[^>]*>.*?<\/style>/gis, '')
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
     const period = e.period || '';
-    const periodParts = period ? period.split(/\s*(?:[\u2013\u2014\-]|\bto\b)\s*/).filter(Boolean) : [];
-    const isCurrent = Boolean(e.dates?.present || period.toLowerCase().includes('present'));
+    const periodParts = period ? period.split(/\s*(?:[\u2013\u2014\-]|to)\s*/).filter(Boolean) : [];
+    const isCurrent = Boolean(e.is_current || e.present || (e.dates?.present) || period.toLowerCase().includes('present'));
 
     let startDate = '';
     let endDate = '';
@@ -388,55 +447,24 @@ export function parseResumeJson(jsonPayload) {
       startDate = periodParts[0];
       endDate = isCurrent ? 'Present' : '';
     } else {
-      startDate = e.dates?.start || '2020';
-      endDate = isCurrent ? 'Present' : (e.dates?.end || '');
+      const dates = e.dates || {};
+      startDate = e.start_date || e.startDate || dates.start || '';
+      endDate = isCurrent ? 'Present' : (e.end_date || e.endDate || dates.end || '');
     }
-
-    const company = e.company || 'Company';
-    const role = e.position || 'Software Engineer';
 
     let finalDesc = cleanDesc;
     let finalBullets = bullets;
 
     if (!cleanDesc && !bullets.length) {
-      if (isCurrent) {
-        if (company.toLowerCase().includes('deloitte')) {
-          finalDesc = 'Architecting full-stack solutions, distributed data pipelines, and GenAI agent platforms for enterprise analytics.';
-          finalBullets = [
-            'Delivered full-stack and GenAI work across APIs, data pipelines, UI and LLM agents for a consumer-spend analytics platform.',
-            'Built over half of the platform’s domain-specialist tool-calling agents, plus a RAG agent over curated documentation and an MCP tool layer.',
-            'Designed grounded LLM generation with server-validated figures, cutting repeat response latency ~45x via hash-based caching.',
-            'Delivered reporting, retail-metrics, and scenario-planning APIs (FastAPI, PostgreSQL, BigQuery) with 97–100% test coverage.',
-            'Built geospatial analytics using HyperLogLog sketches for de-duplicated shopper counts, expanding capacity 10x.',
-            'Optimized PostgreSQL with query-plan-driven indexes, achieving 13x faster query performance.',
-            'Built a generative content pipeline turning anomaly detection into LLM-written articles with automated vision screening.',
-          ];
-          if (!skillsText) {
-            skillsText = 'Python, Typescript, FastAPI, LiteLLM, PostgreSQL, BigQuery, React JS, Gen AI, ArgoCD, KEDA';
-          }
-        } else {
-          finalDesc = `Software Engineer at ${company}, driving scalable backend architectures and cloud data systems.`;
-          finalBullets = [
-            `Driving enterprise software engineering initiatives and system architectures at ${company}.`,
-            `Collaborating with cross-functional engineering teams to deliver scalable, high-performance services.`,
-          ];
-          if (!skillsText) {
-            skillsText = 'Python, Cloud Architecture, Big Data, SQL, Microservices';
-          }
-        }
-      } else {
-        finalDesc = `Key contributor to software engineering and data solutions at ${company}.`;
-        finalBullets = [finalDesc];
-      }
-    } else if (!cleanDesc && bullets.length) {
-      finalDesc = '';
+      finalDesc = `Software Engineer at ${company}, architecting and delivering software engineering initiatives.`;
+      finalBullets = [finalDesc];
     }
 
     return {
-      id: idx + 1,
+      id: e.id || idx + 1,
       company,
       role,
-      location: e.location || '',
+      location: (typeof e.location === 'object' ? e.location.city : e.location) || '',
       start_date: startDate,
       end_date: endDate,
       is_current: isCurrent,
@@ -447,82 +475,111 @@ export function parseResumeJson(jsonPayload) {
     };
   });
 
-  const skillItems = jsonPayload.sections?.skills?.items || [];
+  const skillItems = [
+    ...(jsonPayload.sections?.skills?.items || []),
+    ...(jsonPayload.skills || []),
+  ];
+
   const skills = skillItems.map((s, idx) => {
-    const name = s.name || '';
+    const name = typeof s === 'string' ? s : (s.name || '');
     const nLow = name.toLowerCase();
-    let category = 'Core Competencies';
-    if (['azure', 'synapse', 'pyspark', 'databricks', 'cloud', 'aws', 'gcp'].some(k => nLow.includes(k))) {
-      category = 'Cloud & Big Data';
-    } else if (['python', 'django', 'java', 'spring', 'fastapi', 'flask', 'node'].some(k => nLow.includes(k))) {
-      category = 'Languages & Backend';
-    } else if (['react', 'angular', 'javascript', 'typescript', 'html', 'css'].some(k => nLow.includes(k))) {
-      category = 'Frontend';
-    } else if (['sql', 'mysql', 'postgres', 'mongo', 'database'].some(k => nLow.includes(k))) {
-      category = 'Databases';
-    } else if (['docker', 'kubernetes', 'git', 'devops', 'jenkins', 'pipeline'].some(k => nLow.includes(k))) {
-      category = 'DevOps & Cloud';
+    let category = s.category || 'Core Competencies';
+    if (!s.category) {
+      if (['azure', 'synapse', 'pyspark', 'databricks', 'cloud', 'aws', 'gcp'].some(k => nLow.includes(k))) {
+        category = 'Cloud & Big Data';
+      } else if (['python', 'django', 'java', 'spring', 'fastapi', 'flask', 'node'].some(k => nLow.includes(k))) {
+        category = 'Languages & Backend';
+      } else if (['react', 'angular', 'javascript', 'typescript', 'html', 'css'].some(k => nLow.includes(k))) {
+        category = 'Frontend';
+      } else if (['sql', 'mysql', 'postgres', 'mongo', 'database'].some(k => nLow.includes(k))) {
+        category = 'Databases';
+      } else if (['docker', 'kubernetes', 'git', 'devops', 'jenkins', 'pipeline'].some(k => nLow.includes(k))) {
+        category = 'DevOps & Cloud';
+      }
     }
     return {
-      id: idx + 1,
+      id: s.id || idx + 1,
       name,
       category,
-      proficiency: idx < 8 ? 'Expert' : 'Proficient',
-      display_order: idx + 1,
+      proficiency: s.proficiency || (idx < 8 ? 'Expert' : 'Proficient'),
+      display_order: s.display_order || idx + 1,
     };
   });
 
-  const projItems = jsonPayload.sections?.projects?.items || [];
-  const projects = projItems.map((pr, idx) => ({
-    id: idx + 1,
-    title: pr.name || `Project ${idx + 1}`,
-    subtitle: 'Engineered Solution',
-    description: pr.description?.replace(/<[^>]+>/g, '').trim() || `${pr.name} system implementation.`,
-    tech_stack: 'Python, Cloud Services, REST APIs',
-    github_url: pr.website?.url || '',
-    live_url: '',
-    highlights: JSON.stringify([pr.description?.replace(/<[^>]+>/g, '').trim() || pr.name]),
-    featured: true,
-    display_order: idx + 1,
-  }));
+  const projItems = [
+    ...(jsonPayload.sections?.projects?.items || []),
+    ...(jsonPayload.projects || []),
+  ];
 
-  const eduItems = jsonPayload.sections?.education?.items || [];
-  const education = eduItems.map((ed, idx) => {
-    const edPeriod = ed.period || '';
-    const edParts = edPeriod ? edPeriod.split(/\s*(?:[\u2013\u2014\-]|\bto\b)\s*/).filter(Boolean) : [];
-    const startYear = edParts[0] || ed.dates?.start || '';
-    const endYear = edParts[1] || ed.dates?.end || '';
+  const projects = projItems.map((pr, idx) => {
+    const pUrl = pr.github_url || pr.website?.url || pr.url || (typeof pr.website === 'string' ? pr.website : '') || '';
+    const lUrl = pr.live_url || pr.website_url || (pUrl && !pUrl.includes('github.com') ? pUrl : '');
+    const ghUrl = pr.github_url || (pUrl.includes('github.com') ? pUrl : '');
 
     return {
-      id: idx + 1,
-      institution: ed.school || 'University',
+      id: pr.id || idx + 1,
+      title: pr.name || pr.title || `Project ${idx + 1}`,
+      subtitle: pr.subtitle || 'Engineered Solution',
+      description: (pr.description || '').replace(/<[^>]+>/g, '').trim() || `${pr.name || 'Project'} implementation.`,
+      tech_stack: pr.tech_stack || (Array.isArray(pr.keywords) ? pr.keywords.join(', ') : 'Python, Cloud Services, REST APIs'),
+      github_url: ghUrl,
+      live_url: lUrl,
+      highlights: pr.highlights ? (typeof pr.highlights === 'string' ? pr.highlights : JSON.stringify(pr.highlights)) : JSON.stringify([pr.description?.replace(/<[^>]+>/g, '').trim() || pr.name || 'Project']),
+      featured: pr.featured !== undefined ? pr.featured : true,
+      display_order: pr.display_order || idx + 1,
+    };
+  });
+
+  const eduItems = [
+    ...(jsonPayload.sections?.education?.items || []),
+    ...(jsonPayload.education || []),
+  ];
+
+  const education = eduItems.map((ed, idx) => {
+    const edPeriod = ed.period || '';
+    const edParts = edPeriod ? edPeriod.split(/\s*(?:[\u2013\u2014\-]|to)\s*/).filter(Boolean) : [];
+    const startYear = edParts[0] || ed.dates?.start || ed.start_year || '';
+    const endYear = edParts[1] || ed.dates?.end || ed.end_year || '';
+
+    return {
+      id: ed.id || idx + 1,
+      institution: ed.school || ed.institution || 'University',
       degree: ed.degree || 'Degree',
-      field_of_study: ed.area || 'Engineering',
+      field_of_study: ed.area || ed.field_of_study || 'Engineering',
       grade: ed.grade || '',
       start_year: startYear,
       end_year: endYear,
-      url: ed.website?.url || '',
+      url: ed.website?.url || ed.url || '',
     };
   });
 
-  const awardItems = jsonPayload.sections?.awards?.items || [];
+  const awardItems = [
+    ...(jsonPayload.sections?.awards?.items || []),
+    ...(jsonPayload.awards || []),
+  ];
+
   const awards = awardItems.map((aw, idx) => ({
-    id: idx + 1,
+    id: aw.id || idx + 1,
     title: aw.title || 'Honor',
-    organization: aw.awarder || 'Organization',
-    year: aw.date || aw.dates?.start || '',
-    description: aw.description?.replace(/<[^>]+>/g, '').trim() || '',
-    display_order: idx + 1,
+    organization: aw.awarder || aw.organization || 'Organization',
+    year: aw.date || aw.dates?.start || aw.year || '',
+    description: (aw.description || '').replace(/<[^>]+>/g, '').trim() || '',
+    display_order: aw.display_order || idx + 1,
   }));
 
-  const certItems = jsonPayload.sections?.certifications?.items || [];
+  const certItems = [
+    ...(jsonPayload.sections?.certifications?.items || []),
+    ...(jsonPayload.certifications || []),
+    ...(jsonPayload.certificates || []),
+  ];
+
   const certifications = certItems.map((ct, idx) => ({
-    id: idx + 1,
-    name: ct.title || 'Certificate',
+    id: ct.id || idx + 1,
+    name: ct.title || ct.name || 'Certificate',
     issuer: ct.issuer || 'Accredited Issuer',
-    issue_date: ct.date || '',
-    credential_url: ct.website?.url || '',
-    display_order: idx + 1,
+    issue_date: ct.date || ct.issue_date || '',
+    credential_url: ct.website?.url || ct.url || ct.credential_url || '',
+    display_order: ct.display_order || idx + 1,
   }));
 
   // Client-side fallback AI insights synthesized from parsed profile & experiences
@@ -531,8 +588,6 @@ export function parseResumeJson(jsonPayload) {
   const companyStr = topCompanies.length ? topCompanies.join(', ') : 'leading tech enterprises';
   const topSkills = skills.slice(0, 6).map((s) => s.name);
   const skillStr = topSkills.length ? topSkills.join(', ') : 'Cloud, Distributed Systems & Backend Engineering';
-  const candName = profile.name || 'Candidate';
-  const candTitle = profile.title || 'Senior Software Engineer';
 
   const ai_insights = [
     {
@@ -612,10 +667,14 @@ export const importResumeJson = async (jsonPayload) => {
   const parsed = parseResumeJson(jsonPayload);
   
   // Update localStorage immediately and mark as custom
-  const existing = getLocalData();
+  const existing = getLocalData() || {};
   const updatedData = { 
     ...existing, 
-    ...parsed, 
+    ...parsed,
+    profile: {
+      ...(existing.profile || {}),
+      ...(parsed.profile || {}),
+    },
     is_custom: true, 
     last_updated: Date.now() 
   };

@@ -160,6 +160,7 @@ export default function App() {
 
       {/* Floating AI Agent Chat Widget */}
       <ChatWidget
+        key={portfolioData?.profile?.name || 'agent'}
         isOpen={isChatOpen}
         setIsOpen={setIsChatOpen}
         portfolioData={portfolioData}
