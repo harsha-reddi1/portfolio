@@ -4,7 +4,9 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+import os
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -117,8 +119,31 @@ async def normalize_vercel_path(request: Request, call_next):
     return await call_next(request)
 
 
+# Locate frontend dist directory across local and Vercel serverless environments
+_backend_app_dir = os.path.dirname(os.path.abspath(__file__))
+_repo_root = os.path.dirname(os.path.dirname(_backend_app_dir))
+_possible_dist_dirs = [
+    os.path.join(_repo_root, "frontend", "dist"),
+    os.path.join(os.getcwd(), "frontend", "dist"),
+    "/var/task/frontend/dist",
+]
+_dist_dir = next((d for d in _possible_dist_dirs if os.path.exists(d)), os.path.join(_repo_root, "frontend", "dist"))
+
+# Mount assets directory if available
+if os.path.exists(_dist_dir):
+    _assets_dir = os.path.join(_dist_dir, "assets")
+    if os.path.exists(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+
 @app.exception_handler(404)
 async def custom_404_handler(request: Request, exc):
+    path = request.url.path
+    # For non-API routes, fallback to frontend index.html for Single Page Application routing
+    if not path.startswith("/api") and os.path.exists(_dist_dir):
+        index_file = os.path.join(_dist_dir, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
     return JSONResponse(
         status_code=404,
         content={
@@ -134,7 +159,39 @@ async def custom_404_handler(request: Request, exc):
 # -----------------------------
 
 @app.get("/")
+@app.get("/index.html")
+async def serve_root():
+    if os.path.exists(_dist_dir):
+        index_file = os.path.join(_dist_dir, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+    from .database import db_status
+    return {
+        "status": "healthy",
+        "app": "Portfolio & Blog API",
+        "database": db_status.get("type", "SQLite"),
+        "db_connected": db_status.get("connected", False),
+    }
+
+
+@app.get("/favicon.svg")
+async def serve_favicon():
+    fav = os.path.join(_dist_dir, "favicon.svg")
+    if os.path.exists(fav):
+        return FileResponse(fav)
+    raise HTTPException(status_code=404, detail="Favicon not found")
+
+
+@app.get("/icons.svg")
+async def serve_icons():
+    ico = os.path.join(_dist_dir, "icons.svg")
+    if os.path.exists(ico):
+        return FileResponse(ico)
+    raise HTTPException(status_code=404, detail="Icons not found")
+
+
 @app.get("/api")
+@app.get("/api/")
 def root():
     from .database import db_status
     return {

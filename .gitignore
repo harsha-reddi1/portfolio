@@ -12,8 +12,6 @@ ENV/
 
 # Node / Frontend
 frontend/node_modules/
-frontend/dist/
-frontend/dist-ssr/
 *.local
 
 # Environment variables
@@ -29,5 +27,4 @@ Thumbs.db
 *.swp
 
 # Build outputs
-dist/
 node_modules/
