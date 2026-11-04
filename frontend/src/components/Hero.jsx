@@ -28,6 +28,21 @@ export default function Hero({
 }) {
   if (!profile) return null;
 
+  const firstName = profile?.display_name || profile?.first_name || getCandidateDisplayName(profile?.name, profile?.email, profile?.linkedin_url);
+
+  const isValidUrl = (url, placeholderDomain) => {
+    if (!url || typeof url !== 'string') return false;
+    const trimmed = url.trim();
+    if (!trimmed || trimmed === '#' || trimmed === placeholderDomain || trimmed === `https://${placeholderDomain}` || trimmed === `https://${placeholderDomain}/`) {
+      return false;
+    }
+    const isOwnerHarsha = (profile?.name || '').toLowerCase().includes('harsha');
+    if (!isOwnerHarsha && (trimmed.toLowerCase().includes('harsha') || trimmed.toLowerCase().includes('harshareddy'))) {
+      return false;
+    }
+    return true;
+  };
+
   const headlineParts = useMemo(() => {
     const title = profile?.title || 'Data Engineer, Full Stack Developer';
     const split = title.split(/[,&/|]/).map((s) => s.trim()).filter(Boolean);
