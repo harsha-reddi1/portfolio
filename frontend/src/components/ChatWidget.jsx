@@ -43,7 +43,7 @@ import {
   Network,
   GitBranch,
 } from 'lucide-react';
-import { sendChatMessage, getLocalData } from '../services/api';
+import { sendChatMessage, getLocalData, getCandidateDisplayName } from '../services/api';
 import { GithubIcon, LinkedinIcon } from './Icons';
 
 // Native Web Audio API for subtle HUD audio feedback
@@ -1179,7 +1179,7 @@ export default function ChatWidget({
   const posts = activeData.posts || propPosts || [];
 
   const fullName = profile?.name?.trim() || 'Developer';
-  const firstName = fullName !== 'Developer' ? fullName.split(' ')[0] : 'Developer';
+  const firstName = profile?.display_name || profile?.first_name || getCandidateDisplayName(fullName, profile?.email, profile?.linkedin_url);
   const agentName = `${firstName}'s Agent`;
 
   const [isFullScreen, setIsFullScreen] = useState(true);
@@ -1707,15 +1707,23 @@ export default function ChatWidget({
     }
   };
 
+  const candidatePosts = useMemo(() => {
+    const isHarsha = fullName.toLowerCase().includes('harsha');
+    if (isHarsha) return posts;
+    return (posts || []).filter(p => !p.content?.toLowerCase().includes('pyspark') && !p.content?.toLowerCase().includes('harsha'));
+  }, [posts, fullName]);
+
+  const topSkillName = skills && skills[0]?.name ? skills[0].name : null;
+
   const initialSuggestions = [
     { label: `Who is ${firstName}?`, query: `Who is ${firstName}?` },
     { label: `Show ${firstName}'s featured projects`, query: `Show me ${firstName}'s featured projects` },
     { label: `Where has ${firstName} worked?`, query: `Where has ${firstName} worked in career?` },
     { label: 'Show competency radar chart', query: 'Show the competency radar chart' },
-    { label: 'Show GenAI architecture flow', query: 'Show GenAI system architecture flow' },
+    ...(topSkillName ? [{ label: `Tell me about ${firstName}'s ${topSkillName} skills`, query: `Tell me about ${firstName}'s ${topSkillName} background and projects` }] : []),
+    { label: 'Show system architecture flow', query: 'Show system architecture flow' },
     { label: 'Compare query latency in a graph', query: 'Compare query latency in a graph' },
-    { label: 'Show Postgres query plan comparison', query: 'Show Postgres query plan tuning comparison' },
-    { label: 'What technical blogs did he write?', query: 'What technical blogs did he write?' },
+    ...(candidatePosts.length > 0 ? [{ label: `What technical blogs did ${firstName} write?`, query: `What technical blogs did ${firstName} write?` }] : []),
     { label: 'How can I get in touch?', query: `How can I get in touch with ${firstName}?` },
   ];
 
@@ -1969,7 +1977,7 @@ export default function ChatWidget({
 
                       {/* Dynamic Contextual Follow-Up Suggestions */}
                       <FollowUpSuggestions
-                        suggestions={getFollowUpSuggestions(msg.componentType, msg.text, firstName, experiences, projects)}
+                        suggestions={getFollowUpSuggestions(msg.componentType, msg.text, firstName, experiences, projects, skills)}
                         onSelect={(query) => handleSend(query)}
                       />
                     </div>

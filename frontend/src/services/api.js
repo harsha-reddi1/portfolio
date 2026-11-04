@@ -22,6 +22,33 @@ export const getLocalData = () => {
   return defaultPortfolioData;
 };
 
+// Resolves natural calling / first name for a candidate (e.g. "Raju Lakshmi Priyanka" -> "Priyanka", "Harsha Vardhan Reddi" -> "Harsha")
+export function getCandidateDisplayName(fullName = '', email = '', linkedin = '') {
+  const trimmed = (fullName || '').trim();
+  if (!trimmed || trimmed.toLowerCase() === 'developer') return 'Developer';
+
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0];
+
+  const emailClean = (email || '').toLowerCase().replace(/[^a-z]/g, '');
+  const linkedinClean = (linkedin || '').toLowerCase().replace(/[^a-z]/g, '');
+
+  // Look for a token in the candidate's name that matches their email or LinkedIn username
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const token = parts[i].toLowerCase().replace(/[^a-z]/g, '');
+    if (token.length > 2 && (emailClean.includes(token) || linkedinClean.includes(token))) {
+      return parts[i];
+    }
+  }
+
+  // If candidate has 3 tokens and the first looks like a surname or initial, prefer the last token
+  if (parts.length >= 3 && parts[parts.length - 1].length > 2) {
+    return parts[parts.length - 1];
+  }
+
+  return parts[0];
+}
+
 // Helper to save local data
 export const saveLocalData = (data) => {
   try {
@@ -79,9 +106,40 @@ export const fetchPortfolioData = async () => {
     if (res && res.ok) {
       const remote = await res.json();
       
+      // Sanitize remote profile links and posts to prevent cross-candidate link leakage
+      if (remote && remote.profile && remote.profile.name) {
+        const isHarsha = remote.profile.name.toLowerCase().includes('harsha');
+        if (!isHarsha) {
+          ['hackerrank_url', 'leetcode_url', 'x_url', 'website_url'].forEach((k) => {
+            if (remote.profile[k] && remote.profile[k].toLowerCase().includes('harsha')) {
+              remote.profile[k] = '';
+            }
+          });
+          if (Array.isArray(remote.posts)) {
+            remote.posts = remote.posts.filter((p) => !p.content?.toLowerCase().includes('pyspark') && !p.content?.toLowerCase().includes('harsha'));
+          }
+        }
+        remote.profile.display_name = getCandidateDisplayName(remote.profile.name, remote.profile.email, remote.profile.linkedin_url);
+        remote.profile.first_name = remote.profile.display_name;
+      }
+
       // If user uploaded or customized portfolio locally in this browser, preserve it!
       // Only override if remote explicitly has a newer last_updated timestamp.
       if (isLocalCustom) {
+        // Sanitize local copy if it had old stale links
+        if (local.profile && local.profile.name) {
+          const isHarsha = local.profile.name.toLowerCase().includes('harsha');
+          if (!isHarsha) {
+            ['hackerrank_url', 'leetcode_url', 'x_url', 'website_url'].forEach((k) => {
+              if (local.profile[k] && local.profile[k].toLowerCase().includes('harsha')) {
+                local.profile[k] = '';
+              }
+            });
+          }
+          local.profile.display_name = getCandidateDisplayName(local.profile.name, local.profile.email, local.profile.linkedin_url);
+          local.profile.first_name = local.profile.display_name;
+        }
+
         if (remote?.last_updated && local?.last_updated && remote.last_updated > local.last_updated) {
           saveLocalData(remote);
           return { data: remote, source: 'api' };
@@ -308,9 +366,15 @@ export function parseResumeJson(jsonPayload) {
   // 1. Format: Full Portfolio Export
   if (jsonPayload.profile && (jsonPayload.experiences || jsonPayload.projects || jsonPayload.skills)) {
     const prof = jsonPayload.profile || {};
+    const profName = prof.name || 'Developer';
+    const isHarsha = profName.toLowerCase().includes('harsha');
+    const dName = prof.display_name || prof.first_name || getCandidateDisplayName(profName, prof.email, prof.linkedin_url);
+
     return {
       profile: {
-        name: prof.name || 'Developer',
+        name: profName,
+        display_name: dName,
+        first_name: dName,
         title: prof.title || 'Software Engineer',
         email: prof.email || '',
         phone: prof.phone || '',
@@ -319,10 +383,10 @@ export function parseResumeJson(jsonPayload) {
         years_experience: prof.years_experience || 6,
         linkedin_url: prof.linkedin_url || '',
         github_url: prof.github_url || '',
-        hackerrank_url: prof.hackerrank_url || '',
-        x_url: prof.x_url || '',
-        leetcode_url: prof.leetcode_url || '',
-        website_url: prof.website_url || '',
+        hackerrank_url: (!isHarsha && (prof.hackerrank_url || '').toLowerCase().includes('harsha')) ? '' : (prof.hackerrank_url || ''),
+        x_url: (!isHarsha && (prof.x_url || '').toLowerCase().includes('harsha')) ? '' : (prof.x_url || ''),
+        leetcode_url: (!isHarsha && (prof.leetcode_url || '').toLowerCase().includes('harsha')) ? '' : (prof.leetcode_url || ''),
+        website_url: (!isHarsha && (prof.website_url || '').toLowerCase().includes('harsha')) ? '' : (prof.website_url || ''),
         resume_download_url: prof.resume_download_url || '#',
       },
       experiences: jsonPayload.experiences || [],
@@ -332,7 +396,7 @@ export function parseResumeJson(jsonPayload) {
       awards: jsonPayload.awards || [],
       certifications: jsonPayload.certifications || [],
       ai_insights: jsonPayload.ai_insights || [],
-      posts: jsonPayload.posts || [],
+      posts: isHarsha ? (jsonPayload.posts || []) : (jsonPayload.posts || []).filter((p) => !p.content?.toLowerCase().includes('pyspark') && !p.content?.toLowerCase().includes('harsha')),
     };
   }
 
@@ -372,8 +436,14 @@ export function parseResumeJson(jsonPayload) {
     else if (websiteUrl.includes('linkedin.com') && !linkedin) linkedin = websiteUrl;
   }
 
+  const candidateName = basics.name || 'Developer';
+  const isHarsha = candidateName.toLowerCase().includes('harsha');
+  const displayName = getCandidateDisplayName(candidateName, basics.email || '', linkedin);
+
   const profile = {
-    name: basics.name || 'Developer',
+    name: candidateName,
+    display_name: displayName,
+    first_name: displayName,
     title: basics.headline || basics.title || basics.label || 'Software Engineer',
     email: basics.email || '',
     phone: basics.phone || '',
@@ -382,10 +452,10 @@ export function parseResumeJson(jsonPayload) {
     years_experience: basics.years_experience || 6,
     linkedin_url: linkedin,
     github_url: github,
-    hackerrank_url: hackerrank,
-    x_url: x,
-    leetcode_url: leetcode,
-    website_url: websiteUrl,
+    hackerrank_url: (!isHarsha && hackerrank.toLowerCase().includes('harsha')) ? '' : hackerrank,
+    x_url: (!isHarsha && x.toLowerCase().includes('harsha')) ? '' : x,
+    leetcode_url: (!isHarsha && leetcode.toLowerCase().includes('harsha')) ? '' : leetcode,
+    website_url: (!isHarsha && websiteUrl.toLowerCase().includes('harsha')) ? '' : websiteUrl,
     resume_download_url: basics.resume_download_url || '#',
   };
 
@@ -666,15 +736,16 @@ export function parseResumeJson(jsonPayload) {
 export const importResumeJson = async (jsonPayload) => {
   const parsed = parseResumeJson(jsonPayload);
   
-  // Update localStorage immediately and mark as custom
+  // Wipe out previous candidate's stale data completely when importing new resume
   const existing = getLocalData() || {};
+  const isDifferentCandidate = 
+    existing.profile?.name && parsed.profile?.name && 
+    existing.profile.name.trim().toLowerCase() !== parsed.profile.name.trim().toLowerCase();
+
   const updatedData = { 
-    ...existing, 
     ...parsed,
-    profile: {
-      ...(existing.profile || {}),
-      ...(parsed.profile || {}),
-    },
+    // Clear out previous candidate's posts if candidate changed
+    posts: isDifferentCandidate ? (parsed.posts || []) : (parsed.posts?.length ? parsed.posts : (existing.posts || [])),
     is_custom: true, 
     last_updated: Date.now() 
   };

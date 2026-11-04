@@ -233,6 +233,11 @@ def get_portfolio_data(db: Session = Depends(get_db)):
     posts = db.query(BlogPost).filter(BlogPost.is_published == True).order_by(BlogPost.created_at.desc()).all()
     ai_insights = db.query(AiInsight).order_by(AiInsight.display_order.asc(), AiInsight.id.asc()).all()
 
+    # Filter out Harsha's default blog posts if profile is for a different candidate
+    is_harsha = profile and "harsha" in (profile.name or "").lower()
+    if not is_harsha:
+        posts = [p for p in posts if "harsha" not in (p.content or "").lower() and "pyspark" not in (p.content or "").lower()]
+
     return PortfolioFullData(
         profile=profile,
         experiences=experiences,
@@ -1169,9 +1174,20 @@ async def chat_with_harsha_agent(req: ChatRequest, db: Session = Depends(get_db)
     t_start = time.time()
     raw_key = os.getenv("GEMINI_API_KEY", "")
     api_key = raw_key.strip().strip('"').strip("'").strip()
+    # Resolve first name dynamically
+    cand_name = ""
+    if req.portfolio_data and isinstance(req.portfolio_data, dict):
+        cand_name = req.portfolio_data.get("profile", {}).get("name", "")
+    if not cand_name:
+        prof = db.query(Profile).first()
+        cand_name = prof.name if prof else "Developer"
+    
+    parts = cand_name.split()
+    first_name = parts[-1] if len(parts) >= 3 else (parts[0] if parts else "Developer")
+
     if not api_key:
         return {
-            "reply": "Hello! I am Harsha's AI Agent. To activate live responses, add the GEMINI_API_KEY environment variable in your Vercel Project Settings."
+            "reply": f"Hello! I am {first_name}'s AI Agent. To activate live responses, add the GEMINI_API_KEY environment variable in your Vercel Project Settings."
         }
 
     headers = {

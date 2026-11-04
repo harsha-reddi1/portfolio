@@ -15,6 +15,7 @@ import {
   FolderGit2,
 } from 'lucide-react';
 import { GithubIcon, LinkedinIcon } from './Icons';
+import { getCandidateDisplayName } from '../services/api';
 
 export default function Hero({
   profile,
@@ -158,7 +159,7 @@ export default function Hero({
                 <div className="absolute inset-0 rounded-full border border-dashed border-cyan-400 animate-spin" />
                 <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
               </div>
-              <span className="font-mono tracking-wider">Ask AI Agent</span>
+              <span className="font-mono tracking-wider">Ask {firstName}'s Agent</span>
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
@@ -184,7 +185,7 @@ export default function Hero({
 
           {/* Social Links Bar */}
           <div className="flex flex-wrap items-center justify-center gap-2 pt-4 border-t border-slate-800/60">
-            {profile.linkedin_url && (
+            {isValidUrl(profile.linkedin_url, 'linkedin.com') && (
               <a
                 href={profile.linkedin_url}
                 target="_blank"
@@ -197,7 +198,7 @@ export default function Hero({
               </a>
             )}
 
-            {profile.github_url && (
+            {isValidUrl(profile.github_url, 'github.com') && (
               <a
                 href={profile.github_url}
                 target="_blank"
@@ -210,7 +211,7 @@ export default function Hero({
               </a>
             )}
 
-            {profile.hackerrank_url && (
+            {isValidUrl(profile.hackerrank_url, 'hackerrank.com') && (
               <a
                 href={profile.hackerrank_url}
                 target="_blank"
@@ -223,7 +224,7 @@ export default function Hero({
               </a>
             )}
 
-            {profile.leetcode_url && (
+            {isValidUrl(profile.leetcode_url, 'leetcode.com') && (
               <a
                 href={profile.leetcode_url}
                 target="_blank"
@@ -232,6 +233,18 @@ export default function Hero({
               >
                 <Code2 className="w-3.5 h-3.5 text-amber-400" />
                 <span>LeetCode</span>
+                <ExternalLink className="w-3 h-3 text-slate-600" />
+              </a>
+            )}
+
+            {isValidUrl(profile.x_url, 'x.com') && (
+              <a
+                href={profile.x_url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-400 hover:text-white bg-slate-900/60 hover:bg-slate-800 border border-slate-800 transition-colors"
+              >
+                <span>𝕏</span>
                 <ExternalLink className="w-3 h-3 text-slate-600" />
               </a>
             )}

@@ -17,6 +17,28 @@ import { defaultPortfolioData } from './data/defaultData';
 
 export default function App() {
   const [portfolioData, setPortfolioData] = useState(() => getLocalData());
+
+  // Bulletproof fallback: ensure all expected arrays and profile exist so UI never crashes or renders blank
+  const safeData = useMemo(() => {
+    const base = defaultPortfolioData || {};
+    const cur = portfolioData || {};
+    return {
+      ...base,
+      ...cur,
+      profile: {
+        ...(base.profile || {}),
+        ...(cur.profile || {}),
+      },
+      experiences: Array.isArray(cur.experiences) && cur.experiences.length > 0 ? cur.experiences : (base.experiences || []),
+      skills: Array.isArray(cur.skills) && cur.skills.length > 0 ? cur.skills : (base.skills || []),
+      projects: Array.isArray(cur.projects) && cur.projects.length > 0 ? cur.projects : (base.projects || []),
+      education: Array.isArray(cur.education) ? cur.education : (base.education || []),
+      awards: Array.isArray(cur.awards) ? cur.awards : (base.awards || []),
+      certifications: Array.isArray(cur.certifications) ? cur.certifications : (base.certifications || []),
+      ai_insights: Array.isArray(cur.ai_insights) ? cur.ai_insights : (base.ai_insights || []),
+      posts: Array.isArray(cur.posts) ? cur.posts : (base.posts || []),
+    };
+  }, [portfolioData]);
   const [isApiOnline, setIsApiOnline] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -57,8 +79,8 @@ export default function App() {
   // Dynamically update document title based on uploaded JSON profile data and current view
   useEffect(() => {
     if (portfolioData?.profile?.name) {
-      const name = portfolioData.profile.name;
-      const role = portfolioData.profile.title || 'Engineering Portfolio';
+      const name = safeData.profile.name;
+      const role = safeData.profile.title || 'Engineering Portfolio';
       if (currentView === 'blog') {
         document.title = `${name} | Technical Blog & Articles`;
       } else {
@@ -103,7 +125,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#07090e] text-slate-100 selection:bg-emerald-500/20 selection:text-emerald-300">
       <Navbar
-        profile={portfolioData.profile}
+        profile={safeData.profile}
         currentView={currentView}
         onNavigateBlog={navigateToBlog}
         onNavigatePortfolio={navigateToPortfolio}
@@ -114,56 +136,56 @@ export default function App() {
 
       {currentView === 'blog' ? (
         <Blog
-          profile={portfolioData.profile}
-          posts={portfolioData.posts || []}
+          profile={safeData.profile}
+          posts={safeData.posts || []}
           onBackToPortfolio={navigateToPortfolio}
         />
       ) : (
         <main>
           <Hero
-            profile={portfolioData.profile}
-            experiences={portfolioData.experiences || []}
-            skills={portfolioData.skills || []}
-            projects={portfolioData.projects || []}
-            awards={portfolioData.awards || []}
-            certifications={portfolioData.certifications || []}
+            profile={safeData.profile}
+            experiences={safeData.experiences || []}
+            skills={safeData.skills || []}
+            projects={safeData.projects || []}
+            awards={safeData.awards || []}
+            certifications={safeData.certifications || []}
             onOpenChat={() => setIsChatOpen(true)}
           />
           <About
-            profile={portfolioData.profile}
-            experiences={portfolioData.experiences || []}
-            skills={portfolioData.skills || []}
-            projects={portfolioData.projects || []}
+            profile={safeData.profile}
+            experiences={safeData.experiences || []}
+            skills={safeData.skills || []}
+            projects={safeData.projects || []}
           />
           <AiInsights
-            aiInsights={portfolioData.ai_insights}
-            profile={portfolioData.profile}
-            experiences={portfolioData.experiences || []}
-            skills={portfolioData.skills || []}
+            aiInsights={safeData.ai_insights}
+            profile={safeData.profile}
+            experiences={safeData.experiences || []}
+            skills={safeData.skills || []}
           />
-          <Experience experiences={portfolioData.experiences} />
-          <Skills skills={portfolioData.skills} />
-          <Projects projects={portfolioData.projects} />
+          <Experience experiences={safeData.experiences} />
+          <Skills skills={safeData.skills} />
+          <Projects projects={safeData.projects} />
           <Credentials
-            education={portfolioData.education}
-            awards={portfolioData.awards}
-            certifications={portfolioData.certifications}
+            education={safeData.education}
+            awards={safeData.awards}
+            certifications={safeData.certifications}
           />
-          <Contact profile={portfolioData.profile} />
+          <Contact profile={safeData.profile} />
         </main>
       )}
 
       <Footer
-        profile={portfolioData.profile}
+        profile={safeData.profile}
         onOpenAdmin={() => setIsAdminOpen(true)}
       />
 
       {/* Floating AI Agent Chat Widget */}
       <ChatWidget
-        key={portfolioData?.profile?.name || 'agent'}
+        key={`${safeData?.profile?.name || 'agent'}_${safeData?.profile?.email || ''}`}
         isOpen={isChatOpen}
         setIsOpen={setIsChatOpen}
-        portfolioData={portfolioData}
+        portfolioData={safeData}
       />
 
       {/* Hidden Admin Modal */}
