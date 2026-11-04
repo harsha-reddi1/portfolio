@@ -27,3 +27,7 @@ frontend/dist-ssr/
 .DS_Store
 Thumbs.db
 *.swp
+
+# Build outputs
+dist/
+node_modules/
