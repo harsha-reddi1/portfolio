@@ -5,14 +5,14 @@
   "rewrites": [
     {
       "source": "/api",
-      "destination": "/api/index.py?__path__=/"
+      "destination": "/api/index.py?__path__=/api"
     },
     {
       "source": "/api/(.*)",
       "destination": "/api/index.py?__path__=/$1"
     },
     {
-      "source": "/((?!api/|assets/|favicon\\.svg|icons\\.svg).*)",
+      "source": "/((?!api|assets/|favicon\\.svg|icons\\.svg).*)",
       "destination": "/index.html"
     }
   ]
